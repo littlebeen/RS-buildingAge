@@ -16,7 +16,7 @@ from thop import profile
 import time
 
 DATASET = 'hongkong' #amsterdam hongkong global_hongkong
-MODEL = 'Dino_final' #Dino Dino_improve Dino_moe Dino_geo Dino_geo Unetformer AsymFormer CMTFNet ABCNet CMX CMNeXt Segformer TransUNet CMT FTransDeepLab Unet A2FPN
+MODEL = 'Dino_final' #Dino Dino_improve  Unetformer AsymFormer CMTFNet ABCNet CMX CMNeXt Segformer TransUNet CMT FTransDeepLab Unet A2FPN
 #FTransUNet STunet MFNet
 MODE = 'train'
 PRETRAIN =''

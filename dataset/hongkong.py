@@ -78,9 +78,9 @@ class Hongkong_dataset(torch.utils.data.Dataset):
     def __init__(self, mode,cache=False, augmentation=True):
         super(Hongkong_dataset, self).__init__()
         if mode=='test':
-            MAIN_FOLDER = '../dataset/hk_building_age/val/'
+            MAIN_FOLDER = './my_dataset/hk_building_age/val/'
         else:
-            MAIN_FOLDER = '../dataset/hk_building_age/'+mode+'/'
+            MAIN_FOLDER = './my_dataset/hk_building_age/'+mode+'/'
         DATA_FOLDER = MAIN_FOLDER + 'image/tdop*.tif'
         self.LABEL_FOLDER = MAIN_FOLDER + 'class/'
         self.BOUNDARY_FOLDER = MAIN_FOLDER + 'mask/'
@@ -108,7 +108,7 @@ class Hongkong_dataset(torch.utils.data.Dataset):
         #     if not os.path.isfile(f):
         #         raise KeyError('{} is not a file !'.format(f))
         self.csv_data=[]
-        with open('../dataset/hk_building_age/building_area.csv', 'r', encoding='utf-8') as f:
+        with open('./my_dataset/hk_building_age/building_area.csv', 'r', encoding='utf-8') as f:
             # 读取每一行
             lines = f.readlines()
             # 去掉换行符，按逗号分割
