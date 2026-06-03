@@ -98,30 +98,6 @@ def get_mask_number(pred_instance,masks):
     return result
 
 
-def pixel_accuracy(data,pred, gt):
-    bins = [0, 1000, 5000, 10000, np.inf]
-    labels = ['0-1000', '1000-5000', '5000-10000', '10000+', ]
-    data =[x for sub in data for x in sub]
-    pred =[x for sub in pred for x in sub]
-    gt =[x for sub in gt for x in sub]
-    pred = np.array(pred)
-    gt = np.array(gt)
-    for i in range(len(bins)-1):
-        pred_group=[]
-        gt_group=[] 
-        low = bins[i]
-        high = bins[i+1]
-        if high == np.inf:
-            cnt = np.sum(np.array(data) >= low)
-            gt_group = gt[np.array(data) >= low]
-            pred_group = pred[np.array(data) >= low]
-        else:
-            cnt = np.sum((np.array(data) >= low) & (np.array(data) < high))
-            gt_group = gt[(np.array(data) >= low) & (np.array(data) < high)]
-            pred_group = pred[(np.array(data) >= low) & (np.array(data) < high)]
-        instance_accuracy = metrics_sinple(pred_group, gt_group)
-        print(f"第{labels[i]}组 | 样本数: {cnt}")
-
 def test(net, first=False,loader = val_loader,epoch=100):
     net.eval()
     all_preds = []
