@@ -53,17 +53,6 @@ optimizer = optim.SGD(net.parameters(), lr=base_lr, momentum=0.9, weight_decay=0
 # We define the scheduler
 #scheduler = optim.lr_scheduler.MultiStepLR(optimizer, [25, 35, 45], gamma=0.1)
 scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[15, 25, 35], gamma=0.25)
-# def get_result(output,threshold=0.5):
-#     input_ordinal = output[:, :-1, :, :]  # 取前C-1个通道，shape [1, C-1, H, W]
-#     sigmoid_probs = torch.sigmoid(input_ordinal)  # 激活为0~1的概率值
-    
-#     # 3. 二值化：基于阈值得到二元判断结果（0/1）
-#     binary_predictions = (sigmoid_probs >= threshold).float()  # shape [1, C-1, H, W]
-    
-#     # 4. 逐像素求和，得到建筑年龄类别序号（核心步骤）
-#     #    dim=1：对C-1个二元判断结果求和，shape [1, H, W] -> [H, W]
-#     class_indices = torch.sum(binary_predictions, dim=1).squeeze(0).long()  # 移除批次维度
-#     return class_indices
 
 def get_result(output,threshold=0.5):
     if output.dim()==1:
@@ -108,35 +97,6 @@ def get_mask_number(pred_instance,masks):
         result[i] = torch.mode(instance)[0].item()
     return result
 
-def test_loss(net, first=False,loader = val_loader): #计算test取最大值的loss有多少，大约为1.16，需要配合改一下get_instance_metric的correct值才能跑
-    net.eval()
-    total_loss=0.
-    with torch.no_grad():
-        for batch_idx, (data, mask, height,ufzs, target,boundary, label_year) in enumerate(loader):
-            data, mask,height,ufzs, target,boundary, label_year = Variable(data.cuda()), Variable(mask.cuda()), Variable(height.cuda()),Variable(ufzs.cuda()), Variable(target.cuda()),Variable(boundary.cuda()), Variable(label_year.cuda())
-            output = net(data, height, boundary, ufzs)
-            instance_num,correct,all_building_year = get_instance_metric(output[0], mask[0],label_year, target)
-            correct = torch.stack(correct, dim=0).cuda()
-            new_output = []
-            new_output.append(correct)
-            new_output.append(correct)
-            loss = loss_calc_only_instance(new_output, target,boundary)
-            total_loss += loss.item()
-        total_loss /= len(loader)
-        print(test_loss)
-
-def test_loss_train(net,loader = test_loader):
-    net.eval()
-    test_loss=0.
-    for batch_idx, (data, mask, height,ufzs, target,boundary,label_year) in enumerate(loader):
-        data, mask,height,ufzs, target,boundary = Variable(data.cuda()), Variable(mask.cuda()), Variable(height.cuda()),Variable(ufzs.cuda()), Variable(target.cuda()),Variable(boundary.cuda())
-        with torch.no_grad():
-            output = net(data, height, boundary, ufzs)
-            loss_ce = loss_calc_only_instance(output, target,boundary, weights=None)
-            test_loss += loss_ce.item()
-    test_loss /= len(loader)
-    print(test_loss)
-    net.train()
 
 def pixel_accuracy(data,pred, gt):
     bins = [0, 1000, 5000, 10000, np.inf]
@@ -169,32 +129,23 @@ def test(net, first=False,loader = val_loader,epoch=100):
     all_build=[]
     all_build_year=[]
     correct_build=[]
-    j=0
-    mask_list = []
-    feature_list = []
-    labels = []
-    all_pixel=[]
     with torch.no_grad():
         for batch_idx, (data, mask, height,ufzs, target,boundary,geo_instance, label_year) in enumerate(loader):
-            if batch_idx!=14:
-                continue
+   
             data, mask,height,ufzs, target,boundary,geo_instance, label_year = Variable(data.cuda()), Variable(mask.cuda()), Variable(height.cuda()),Variable(ufzs.cuda()), Variable(target.cuda()),Variable(boundary.cuda()),Variable(geo_instance.cuda()), Variable(label_year.cuda())
             output = net(data, height, boundary, ufzs,geo_instance)
             class_indices = get_result(output[0])
-            break
-            # if batch_idx%100==0:
-            #     print(batch_idx)
-            # if batch_idx>20:
-            #     break
-            # if batch_idx<20:
-            #     for item in range(class_indices.shape[0]):
-            #         class_indices[target == -1]=-1
-            #         boundary[boundary>=0]=1
-            #         #save_img(boundary[item], main_dir, name = "boundary_{}".format(batch_idx))
-            #         convert_to_color(class_indices[item], main_dir, name = "pred_{}".format(batch_idx))
-            #         convert_to_color(target[item], main_dir, name = "gt_{}".format(batch_idx))
-            #         #save_img(data[item], main_dir, name = "img_{}".format(batch_idx))
-            #         #save_img(height[item], main_dir, name = "height_{}".format(batch_idx))
+           
+    
+            if batch_idx<20:
+                for item in range(class_indices.shape[0]):
+                    class_indices[target == -1]=-1
+                    boundary[boundary>=0]=1
+                    #save_img(boundary[item], main_dir, name = "boundary_{}".format(batch_idx))
+                    convert_to_color(class_indices[item], main_dir, name = "pred_{}".format(batch_idx))
+                    convert_to_color(target[item], main_dir, name = "gt_{}".format(batch_idx))
+                    #save_img(data[item], main_dir, name = "img_{}".format(batch_idx))
+                    #save_img(height[item], main_dir, name = "height_{}".format(batch_idx))
             instance_num,correct,all_building_year,instance_number_pixel = get_instance_metric(output[0], mask[0],label_year, target)
             if torch.is_tensor(output[1]):
                 if LOSS=='ORD':
@@ -202,53 +153,18 @@ def test(net, first=False,loader = val_loader,epoch=100):
                 if LOSS =='SEG':
                     correct = get_result(output[1]).cpu()
 
-            # mask_list.append(boundary.cpu())
-            # feature_list.append(output[1].cpu())
-            # labels.append(target.cpu())
-
             valid_mask = target != -1
             target = target[valid_mask]
             class_indices = class_indices[valid_mask]
             if first and batch_idx>5:
                 break
             
-            # time_pred=[]
-            # time_gt=[]
-            # time_build=[]
-            # time_correct_build=[]
-            # time_build.append(instance_num)
-            # time_correct_build.append(correct)
-            # time_pred.append(class_indices.cpu().numpy())
-            # time_gt.append(target.cpu().numpy())
 
             all_preds.append(class_indices.cpu().numpy())
             all_gts.append(target.cpu().numpy())
             all_build.append(instance_num)
             all_build_year.append(all_building_year)
             correct_build.append(correct)
-            all_pixel.append(instance_number_pixel)
-
-            # accuracy = metrics_sinple(np.concatenate([p.ravel() for p in time_pred]),
-            #                 np.concatenate([p.ravel() for p in time_gt]))
-            # instance_accuracy = metrics_sinple(np.concatenate([p for p in time_correct_build]),
-            #                 np.concatenate([p for p in time_build]))
-            # if(instance_accuracy>25):
-            #     all_preds.append(class_indices.cpu().numpy())
-            #     all_gts.append(target.cpu().numpy())
-            #     all_build.append(instance_num)
-            #     correct_build.append(correct)
-            #     file_list.append(file_name[0])
-            # else:
-            #     j+=1
-            #     file_list2.append(file_name[0])
-
-        # 一次性写入文件
-        # content = "\n".join(file_list)
-        # with open("output.txt", "w", encoding="utf-8") as f:
-        #     f.write(content)
-        # content2 = "\n".join(file_list2)
-        # with open("output2.txt", "w", encoding="utf-8") as f:
-        #     f.write(content2)
 
         accuracy = metrics(np.concatenate([p.ravel() for p in all_preds]),
                             np.concatenate([p.ravel() for p in all_gts]))
@@ -256,25 +172,6 @@ def test(net, first=False,loader = val_loader,epoch=100):
                             np.concatenate([p for p in all_build]))
         mse_rmse(np.concatenate([p for p in correct_build]),
                             np.concatenate([p for p in all_build_year]))
-        # pixel_accuracy(all_pixel,correct_build,all_build)
-        #generate_image(mask_list, feature_list,labels)
-
-        # unique_vals, val_counts = np.unique(np.concatenate([p.ravel() for p in all_gts]), return_counts=True)
-        # print("="*50)
-        # print(f"mask数组共包含 {len(unique_vals)} 种唯一值")
-        # print("值 | 对应像素数量")
-        # print("-"*20)
-        # for val, count in zip(unique_vals, val_counts):
-        #     print(f"{val:>d} | {count:>8d} 个像素")
-        # print("="*50)
-        # unique_vals, val_counts = np.unique(np.concatenate(all_build), return_counts=True)
-        # print("="*50)
-        # print(f"mask数组共包含 {len(unique_vals)} 种唯一值")
-        # print("值 | 对应像素数量")
-        # print("-"*20)
-        # for val, count in zip(unique_vals, val_counts):
-        #     print(f"{val:>d} | {count:>8d} 个像素")
-        # print("="*50)
         return accuracy
 
 def test_semantic(net,first=False, loader = val_loader,epoch=100):
@@ -306,46 +203,6 @@ def test_semantic(net,first=False, loader = val_loader,epoch=100):
 
         return accuracy
 
-def test_all(net, loader = val_loader):
-    net.eval()
-    all_building = np.zeros((341962, 6))
-    # Switch the network to inference mode
-    with torch.no_grad():
-        for batch_idx, (data, mask, height,ufzs,boundary, id_mapping) in enumerate(loader):
-            data, mask,height,ufzs,boundary = Variable(data.cuda()), Variable(mask.cuda()), Variable(height.cuda()),Variable(ufzs.cuda()),Variable(boundary.cuda())
-            optimizer.zero_grad()
-            output = net(data, height, boundary, ufzs)
-            all_np_keys = [key for key in id_mapping.keys() if isinstance(key, np.int64)]
-            for i in range(len(all_np_keys)):
-                count = (boundary == i).sum().item()
-                pp =output[1][i].cpu().numpy()*count/100.
-                all_building[all_np_keys[i]]+=pp
-            # if batch_idx>10:
-            #     break
-            if batch_idx%100==0:
-                print(batch_idx)
-        max_ids = np.argmax(all_building, axis=1)
-        all_zero_rows = np.all(all_building == 0, axis=1)
-        max_ids[all_zero_rows] = -1
-        np.savetxt(
-            './all_building.txt',          # 保存路径
-            max_ids,                       # 要保存的数组
-            fmt="%d",           # 格式：整数（避免科学计数法）
-            newline="\n"        # 每行一个值，换行符分隔
-        )
-    return max_ids
-
-
-# 计算全模型梯度的总L2范数
-def get_total_grad_norm(model):
-    grad_norm = 0.0
-    for param in model.parameters():
-        if param.grad is not None:
-            grad_norm += torch.norm(param.grad) **2
-    grad_norm = torch.sqrt(grad_norm)
-    print(f"\n全模型梯度总范数：{grad_norm.item():.4f}")
-    return grad_norm.item()
-
 def train(net, optimizer, epochs,test_function,  scheduler=None, weights=WEIGHTS, save_epoch=1):
     losses = np.zeros(1000000)
     mean_losses = np.zeros(100000000)
@@ -364,7 +221,6 @@ def train(net, optimizer, epochs,test_function,  scheduler=None, weights=WEIGHTS
             output = net(data, height, boundary, ufzs,geo_instance)
             loss = loss_calculate(output, target,boundary,e)
             loss.backward()
-            #total_grad_norm = get_total_grad_norm(net)
             optimizer.step()
 
             losses[iter_] = loss.data
@@ -390,14 +246,10 @@ def train(net, optimizer, epochs,test_function,  scheduler=None, weights=WEIGHTS
 test_function = test_semantic if DATASET=='amsterdam' else test
 
 if MODE == 'train':
-    # net.load_state_dict(torch.load('./Dino_epoch42_0.4564934817950233.pth'),strict=False) 
     train(net, optimizer, 60, test_function, scheduler)
 if MODE == 'test':
     net.load_state_dict(torch.load(PRETRAIN),strict=True) 
     print("Model loaded from {}".format(PRETRAIN))
     net.eval()
-    if DATASET=='global_hongkong':
-        test_all(net,val_loader)
-    else:
-        MIoU = test_function(net, loader=val_loader)
-        print("MIoU: ", MIoU)
+    MIoU = test_function(net, loader=val_loader)
+    print("MIoU: ", MIoU)
