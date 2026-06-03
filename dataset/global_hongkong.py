@@ -22,23 +22,15 @@ def generate_instance_mask(mask, ignore_bg = 0,min_pixel=20):
 
 
     unique_ids = np.unique(mask[mask != ignore_bg])
-    unique_ids = np.sort(unique_ids)  # 排序确保映射顺序稳定
-    
-    # 2. 建立新旧编号的映射表（原大数值→连续0~n）
+    unique_ids = np.sort(unique_ids)  
+
     id_mapping = {old_id: new_id for new_id, old_id in enumerate(unique_ids)}
-    # 背景值保留原值（映射表中补充）
     id_mapping[ignore_bg] = -1
 
-
-    
-    # 3. 向量化替换：用映射表将原mask值转为新编号（核心！无需循环）
-    # 步骤1：创建掩码，区分背景和instance
     bg_mask = (mask == ignore_bg)
-    # 步骤2：对非背景区域做映射（利用np.vectorize向量化）
     vectorized_map = np.vectorize(lambda x: id_mapping[x])
     remapped_mask = vectorized_map(mask)
-    
-    # 验证：确保背景值未被修改（可选，增强鲁棒性）
+
     assert np.all(remapped_mask[bg_mask] == -1), "背景值映射错误"
     
     return remapped_mask, id_mapping
@@ -115,20 +107,12 @@ class Hongkong_dataset(torch.utils.data.Dataset):
     
 
 def extract_instance_masks(instance_id_tensor) -> dict:
-    """
-    从W×H的instance ID张量中，提取每个instance的二值mask
-    :param instance_id_tensor: 形状(W, H)的tensor，像素值=instance编号（从0开始）
-    :return: 字典，key=instance编号，value=对应二值mask（W×H的bool tensor，1=该instance区域）
-    """
-    # 1. 获取图中所有非重复的instance编号（排除全0背景，若0是背景则过滤，否则保留）
     unique_ids = np.unique(instance_id_tensor)
-    # 备注：若0是背景（无意义instance），则过滤：
     unique_ids = unique_ids[unique_ids != -1]
     
-    # 2. 向量化提取每个instance的二值mask（无循环）
     instance_masks = []
     for ins_id in unique_ids:
-        # 生成该instance的二值mask：像素值==ins_id的位置为True
+
         mask = (instance_id_tensor == ins_id)
         instance_masks.append(mask)
     

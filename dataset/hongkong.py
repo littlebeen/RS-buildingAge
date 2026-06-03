@@ -5,56 +5,8 @@ import os
 import numpy as np
 from skimage import io
 from scipy.ndimage import label as label11
-from config import convert_to_color,save_img
 from scipy.stats import mode
 import albumentations as A
-
-
-
-def generate_first_impervious_year(imperv_data):
-    # 步骤1：数据维度校验与标准化（确保输入为4×W×H，类型为np.ndarray）
-    n_times, H, W = imperv_data.shape
-    assert n_times == 4, "输入数据应包含4个时相的impervious信息"
-    imperv = imperv_data.copy() 
-
-    # 步骤2：定义4个时相对应的年份（严格按1990/2000/2010/2020顺序）
-    year_mapping = np.array([3, 4, 5, 6])
-    first_imperv_map = np.full(shape=(1, H, W), fill_value=0, dtype=np.int32)
-
-    # 步骤3：创建有效像素掩码（排除缺测值0，仅保留1/2的有效像素）
-    valid_mask = (imperv != 0)
-    valid_pixel = valid_mask.all(axis=0)  # 形状(H, W)，True=该像素4个时相均无缺测
-
-    imperv_mask = (imperv == 2)  # 形状(4, H, W)，True=不透水面
-    first_imperv_idx = np.argmax(imperv_mask, axis=0)  # 形状(H, W)，值为0/1/2/3（对应4个时相）
-    # 修正：无不透水面的有效像素，首次索引设为-1
-    no_imperv = ~imperv_mask.any(axis=0)  # 形状(H, W)，True=全程无不透水面
-    first_imperv_idx[no_imperv] = 0
-
-    # 步骤5：验证首次不透化后是否永久保持（排除1→2→1的多次突变）
-    permanent_imperv = np.zeros(shape=(H, W), dtype=bool)  # 形状(H, W)，True=永久不透化
-    for i in range(H):
-        for j in range(W):
-            idx = first_imperv_idx[i, j]
-            if idx == -1:
-                continue  # 全程无不透水面，跳过
-            if valid_pixel[i, j]:
-                # 检查首次不透化后所有时相是否均为不透水面（2）
-                if imperv_mask[idx:, i, j].all():
-                    permanent_imperv[i, j] = True
-
-    ## 情况2：首次永久不透化的像素 → 赋值对应年份（1990/2000/2010/2020）
-    for idx in range(4):
-        # 找到该时相首次永久不透化的像素
-        target_pixel = (first_imperv_idx == idx) & permanent_imperv & valid_pixel
-        first_imperv_map[0, target_pixel] = year_mapping[idx]
-
-    ## 情况3：有效像素中全程透水（无不透水面）或多次突变（非永久不透化）→ 0（无建筑背景）
-    background_pixel = (no_imperv | ~permanent_imperv) & valid_pixel  # 形状(H, W)
-    first_imperv_map[0, background_pixel] = 0
-    return first_imperv_map
-
-
 
 
 
@@ -151,28 +103,26 @@ class Hongkong_dataset(torch.utils.data.Dataset):
         geo_instance=np.zeros((50,4),dtype=np.float32)
         unique_ids, counts = np.unique(mask_flat, return_counts=True)
         
-        # Step 2: 构建「原ID→出现次数」字典（排除0，0默认是背景）
+
         id_count_dict = dict(zip(unique_ids, counts))
         
-        # Step 3: 筛选保留的实例（次数≥阈值，且原ID≠0）
+
         retained_ids = [
             id_ for id_ in unique_ids 
             if id_ != 0 and id_count_dict[id_] >= min_count_threshold
         ]
         
-        # Step 4: 构建重编码映射表（原ID→新ID，从1开始连续编号）
-        id_mapping = {0: 0}  # 背景0保持不变
+        id_mapping = {0: 0} 
         for new_id, old_id in enumerate(retained_ids, start=1):
             geo_instance[new_id-1] =self.csv_data[old_id-1]
             id_mapping[old_id] = new_id
         
-        # Step 5: 低频实例归为0（未出现在retained_ids中的非0ID）
+
         for old_id in unique_ids:
             if old_id != 0 and old_id not in retained_ids:
                 id_mapping[old_id] = 0
         
-        # Step 6: 应用映射表，生成重编码后的mask
-        # 用np.vectorize高效替换值（支持任意维度）
+
         vectorized_mapping = np.vectorize(lambda x: id_mapping[x])
         reencoded_mask = vectorized_mapping(mask)
         
@@ -180,20 +130,13 @@ class Hongkong_dataset(torch.utils.data.Dataset):
         return reencoded_mask,geo_instance, len(retained_ids)
     
     def extract_instance_masks(self,instance_id_tensor) -> dict:
-        """
-        从W×H的instance ID张量中，提取每个instance的二值mask
-        :param instance_id_tensor: 形状(W, H)的tensor，像素值=instance编号（从0开始）
-        :return: 字典，key=instance编号，value=对应二值mask（W×H的bool tensor，1=该instance区域）
-        """
-        # 1. 获取图中所有非重复的instance编号（排除全0背景，若0是背景则过滤，否则保留）
+
         unique_ids = np.unique(instance_id_tensor)
-        # 备注：若0是背景（无意义instance），则过滤：
+     
         unique_ids = unique_ids[unique_ids != -1]
         
-        # 2. 向量化提取每个instance的二值mask（无循环）
         instance_masks = []
         for ins_id in unique_ids:
-            # 生成该instance的二值mask：像素值==ins_id的位置为True
             mask = (instance_id_tensor == ins_id)
             instance_masks.append(mask)
         return instance_masks
@@ -239,28 +182,10 @@ class Hongkong_dataset(torch.utils.data.Dataset):
         boundary = boundary-1 #整张图的instance mask 从-1开始
         instances = self.extract_instance_masks(boundary) #转换为instance mask
         label_id[boundary == -1] = 0
-        # instances_class=get_mask_classes(instances,label_id) #获得所有instance
-        # random_int = random.randint(0, len(instances)-1)
-        # one_instances =instances[random_int]
-        # unique_values1 = np.unique(instance)
-        # print(unique_values1)
-        # print(instance_num)
-        #convert_to_color(instance[0]-1, main_dir='.', name='instance_{}'.format(i))
-
         # Data augmentation
         ufzs = np.stack(ufzs, axis=0).astype(np.float32)
         if self.mode == 'train' and self.augmentation:
             data, boundary, height,label,label_id, ufzs = self.data_augmentation(data,boundary, height, label,label_id, ufzs)
-        
-        # ufzs = generate_first_impervious_year(ufzs).astype(np.float32)
-        # zero_mask = np.repeat((instance == -1)[np.newaxis, :, :], repeats=3, axis=0)
-        # save_img(data, './', name = "imgpre_{}".format(1))
-        # data [zero_mask]= 0
-        # save_img(data, './', name = "img_{}".format(1))
-        # save_img(one_instances, './', name = "mask_{}".format(1))
-        # convert_to_color(label-1, main_dir='.', name='instance_{}'.format(i))
-        # if random.random() < 0.5:
-        #     height[:]=0
         if self.mode == 'train' or self.mode == 'test':
             return (torch.from_numpy(data),
                     torch.from_numpy(data), #无用之前是instances表示每一个instance 的mask，但train里面没有用到，先放data占位
