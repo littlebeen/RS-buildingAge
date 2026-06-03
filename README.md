@@ -51,4 +51,8 @@ This project includes the code for ten image-based models, Unet, Unetformer, ABC
 1. Change the config 'PRETRAIN' to your pretrain model path.
 2. python test.py (metrics include Accuracy, mF1, mIoU, MAE, and RMSE)
 
+**Weights**
+
+* Our pre-train model on Hong Kong dataset could be also downloaded from link: [download link](https://huggingface.co/datasets/littlebeen/Buildingage/tree/main)
+
 If you have any questions, be free to contact me!
