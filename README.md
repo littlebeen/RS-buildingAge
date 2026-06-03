@@ -1,5 +1,5 @@
-# Cloud-removal-model-collection
-A collection of the existing end-to-end cloud removal models
+# Building age estimation
+A novel building age estimation model based on remote sensing data
 
 This project includes the code for ten image-based models, Unet, Unetformer, ABCNet, Segformer, CMNeXt, TransUnet, CMTFNet, CMT, Deeplab, A2FPN, and three multi-modal-based models, namely CMX, Asymformer, MFNet for building age estimation. Additionally, it incorporates the data loaders for amsterdam, and a custom dataset named Hong Kong. The respective papers for these models and the download links for the datasets are provided below.
 
