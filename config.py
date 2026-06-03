@@ -150,9 +150,9 @@ def convert_to_color(arr_2d, main_dir,name, palette=palette):
     for c, i in palette.items():
         m = arr_2d == c
         arr_3d[m] = i
-    color_img = Image.fromarray(arr_3d)  # 彩色图直接转换
+    color_img = Image.fromarray(arr_3d)  
 
-    color_img.save(os.path.join(main_dir, name + ".jpg"))  # 保存彩色图
+    color_img.save(os.path.join(main_dir, name + ".jpg")) 
 
 def convert_from_color(arr_3d, palette=invert_palette):
     """ RGB-color encoding to grayscale labels """
@@ -179,7 +179,6 @@ def save_img(tensor, main_dir, name):
 
 def hotmap(feature):
 
-    # 取每个通道的均值，变成一张热力图 (128,128)
     heatmap = feature.mean(dim=0).detach().cpu().numpy()
 
     plt.figure(figsize=(8, 8))
@@ -219,20 +218,17 @@ def object_process(object):
 
 
 def focalLoss(inputs, targets, gamma=2,num_classes=N_CLASSES):
-    # inputs: 模型输出 [N, num_classes]
-    # targets: 标签 [N]
+
     
     log_prob = F.log_softmax(inputs, dim=-1)
     prob = torch.exp(log_prob)
     
-    # 核心：难样本加权
+
     focal_weight = (1 - prob) ** gamma
     log_prob = focal_weight * log_prob
-    
-    # 转成 one-hot
+
     targets = F.one_hot(targets, num_classes=num_classes).float()
     
-    # 计算损失
     loss = - (targets * log_prob).sum(dim=-1)
     return loss.mean()
 
@@ -279,22 +275,14 @@ class CrossEntropy2d_ignore(nn.Module):
     
 
 def manual_cross_entropy_with_soft_label(input: torch.Tensor, soft_label: torch.Tensor, dim: int = 1):
-    """
-    手动实现交叉熵损失（适配高斯模糊后的软标签）
-    :param input: 模型输出（未经过softmax），形状(N,C)（分类）或(N,C,H,W)（分割）
-    :param soft_label: 高斯模糊后的软标签，形状(N,C)（分类）或(N,C,H,W)（分割）
-    :param dim: 类别维度（分类/分割均为1）
-    :return: 标量损失值
-    """
-    # 1. 模型输出做log_softmax（数值稳定，避免log(0)）
+
     log_pred = F.log_softmax(input, dim=dim)
     
-    # 2. 计算负对数似然：-∑(soft_label * log_pred) / 样本数
-    # 逐元素相乘后求和，再除以总样本数（分类：N；分割：N*H*W）
-    if len(input.shape) == 2:  # 分类任务：(N,C)
+
+    if len(input.shape) == 2: 
         num_samples = input.shape[0]
         loss = -torch.sum(soft_label * log_pred) / num_samples
-    else:  # 分割任务：(N,C,H,W)
+    else: 
         num_samples = input.shape[0] * input.shape[1] * input.shape[2]
         loss = -torch.sum(soft_label * log_pred) / num_samples
     
@@ -305,21 +293,15 @@ def pdf_fn(x):
   return x_pdf
 
 def fast_label_to_dist(one_hot_label):
-    """
-    向量化生成label_dist，无任何for循环
-    :param one_hot_label: 输入one-hot标签，形状(N, C)，N为样本数，C为类别数
-    :return: label_dist，形状(N, C)，和原代码逻辑完全一致
-    """
-    # 步骤1：批量获取所有样本的目标索引t（替代torch.where+循环），形状(N,)
-    target_idx = torch.argmax(one_hot_label, dim=1)  # one-hot找1的索引，比where快10倍+
-    
-    # 步骤2：生成位置索引矩阵（0到C-1），形状(1, C)，广播到(N, C)
+
+    target_idx = torch.argmax(one_hot_label, dim=1)  
+
     C = one_hot_label.shape[1]
-    pos_idx = torch.arange(C, device=one_hot_label.device).unsqueeze(0)  # (1, C)
+    pos_idx = torch.arange(C, device=one_hot_label.device).unsqueeze(0)  
     
-    # 步骤3：将target_idx广播到(N, C)，计算绝对距离（核心！等价于原代码的序列）
-    target_idx_expand = target_idx.unsqueeze(1)  # (N, 1) → 广播到(N, C)
-    label_dist = torch.abs(pos_idx - target_idx_expand)  # 绝对距离，形状(N, C)
+    
+    target_idx_expand = target_idx.unsqueeze(1) 
+    label_dist = torch.abs(pos_idx - target_idx_expand)  
     
     return label_dist
 
@@ -492,7 +474,6 @@ def metrics_sinple(predictions, gts, label_values=LABELS):
 
 
 def change_back_year(predictions):
-    # 将预测的类别标签转换回对应的建筑年代
     year_mapping = {
         0: 1965,
         1: 1975,
@@ -501,7 +482,7 @@ def change_back_year(predictions):
         4: 2005,
         5: 2015,
     }
-    # 使用向量化操作进行转换
+
     vectorized_mapping = np.vectorize(year_mapping.get)
     predicted_years = vectorized_mapping(predictions)
     return predicted_years
