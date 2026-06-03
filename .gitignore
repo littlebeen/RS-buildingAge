@@ -17,7 +17,5 @@ dist/
 # Ignore vscode directory
 .vscode/
 result/
-weights/
 *.pth
 log_base*
-*.txt
