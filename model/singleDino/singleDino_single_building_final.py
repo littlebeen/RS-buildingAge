@@ -4,85 +4,88 @@ import torch.nn.functional as F
 from .resnet import LULCEncoder,DSMEncoder
 from torchvision.ops import DeformConv2d
 from .dinov3 import LayerNorm2d,DINOv3,Decoder
-from .singleDino_single_building_geo import GeoConditionalAdaIN,AttentionPool
-from kmean import save_each_expert_heatmap_separately,save_feature_heatmaps_with_bar
-#模态合并v1    
-class SimpleTriModalFusion(nn.Module):
+ 
+
+class GeoConditionalAdaIN(nn.Module):
+    def __init__(self, img_dim=64, geo_dim=4):
+        super().__init__()
+        self.norm = nn.LayerNorm(img_dim)
+        self.img_dim = img_dim
+        self.geo_proj = nn.Sequential(
+            nn.Linear(geo_dim, geo_dim * 2),
+            nn.LayerNorm(geo_dim * 2),
+            nn.GELU(),
+        )
+
+        self.geo_to_gamma = nn.Linear(geo_dim*2, img_dim)
+        self.geo_to_beta  = nn.Linear(geo_dim*2, img_dim)
+
+    def forward(self, instance_feat, geo_feat):
+        B, C = instance_feat.shape  # [B, 64]
+        feat_norm = self.norm(instance_feat)
+        geo_feat = self.geo_proj(geo_feat)
+
+        gamma = self.geo_to_gamma(geo_feat)  # [B,64]
+        beta  = self.geo_to_beta(geo_feat)   # [B,64]
+
+        fused_feat = feat_norm * gamma + beta  # [B,64]
+
+        return fused_feat
+
+class AttentionPool(nn.Module):
     def __init__(self, dim):
         super().__init__()
-        self.norm = LayerNorm2d(dim)
-        # 直接把3个模态concat，再用1x1卷积融合回dim维度
-        self.fusion = nn.Conv2d(dim * 3, dim, kernel_size=1)
+        self.attn = nn.Conv2d(dim, 1, 1)
+    def forward(self, x, mask):
+        B, C, H, W = x.shape
+        if H == 1 and W == 1:
+            return x.squeeze()
+        weight = self.attn(x).sigmoid() * mask
+        weight = weight / (weight.sum((2,3), keepdim=True) + 1e-6)
+        return (x * weight).sum((2,3))
 
-    def forward(self, img, depth, lulc, modality_mask=None):
-        # 直接拼接三个模态
-        fused = torch.cat([img, depth, lulc], dim=1)
-        # 1x1卷积融合
-        fused = self.fusion(fused)
-        return self.norm(fused)  
-    
-#模态融合v4无cross attention    
 
 class CosGuidedMoEFusion(nn.Module):
-    def __init__(self, dim, num_experts=2, dropout=0.0):  # 专家减到2个！
+    def __init__(self, dim, num_experts=2, dropout=0.0): 
         super().__init__()
         self.dim = dim
         self.num_experts = num_experts
 
-        # ----------------------
-        # 极简 MoE 专家（超快）
-        # ----------------------
+
         self.experts = nn.ModuleList([
-            nn.Conv2d(dim*2, dim, kernel_size=1)  # 1x1卷积 = 最快
+            nn.Conv2d(dim*2, dim, kernel_size=1) 
             for _ in range(num_experts)
         ])
 
-        # ----------------------
-        # 模态门控 + MoE门控（极简）
-        # ----------------------
         self.modal_gate = nn.Conv2d(dim*3, num_experts, kernel_size=1)
         self.norm = LayerNorm2d(dim)
 
     def forward(self, img, dsm, lulc, modality_mask):
         B, C, H, W = img.shape
         
-        # ======================
-        # 1. 保留【模态掩码mask】创新点
-        # ======================
-        mask_spatial = modality_mask.unsqueeze(-1).unsqueeze(-1)  # [B,3,1,1]
-        dsm = dsm * mask_spatial[:,1:2]  # 掩码控制dsm是否生效
-        lulc = lulc * mask_spatial[:,2:3]# 掩码控制lulc是否生效
 
-        # 辅助特征融合
+        mask_spatial = modality_mask.unsqueeze(-1).unsqueeze(-1)  # [B,3,1,1]
+        dsm = dsm * mask_spatial[:,1:2]  
+        lulc = lulc * mask_spatial[:,2:3]
+
+
         ctx = dsm + lulc
 
-        # ======================
-        # 2. 保留【轻量余弦引导】
-        # ======================
+
         cos_sim = F.cosine_similarity(img.flatten(2), ctx.flatten(2), dim=1, eps=1e-8)
-        save_feature_heatmaps_with_bar(cos_sim.view(B,1,H,W), "cos_sim",color_bar=True)
-        img_guided = img * (1 + 0.1 * cos_sim.view(B,1,H,W))  # 轻量不耗时
-        save_feature_heatmaps_with_bar(img_guided, "img_guide")
-        # ======================
-        # 3. 保留【MoE混合专家】创新点
-        # ======================
+      
+        img_guided = img * (1 + 0.1 * cos_sim.view(B,1,H,W))
+
+
         feat = torch.cat([img_guided, ctx], dim=1)
         
-        # 轻量门控（无循环，无耗时操作）
+
         gate = self.modal_gate(torch.cat([img, dsm, lulc], dim=1))
         gate = torch.softmax(gate, dim=1)  # [B, num_experts, H, W]
-        #save_each_expert_heatmap_separately(gate)
-
-        # 专家融合（最快写法）
         fused = 0.0
         for i in range(self.num_experts):
-
             fused = fused + gate[:, i:i+1] * self.experts[i](feat)
-            t = self.experts[i](feat)
-            #save_feature_heatmaps_with_bar(t, "expert_{}".format(i))
-            save_feature_heatmaps_with_bar(gate[:, i:i+1] * self.experts[i](feat), "gateexpert_{}".format(i))
 
-        # 残差连接
         out = self.norm(img + fused)
         return out
 
@@ -97,47 +100,6 @@ class DeformableConvBlock(nn.Module):
         x = self.deform(x, offset)
         return self.norm(x)
 
-
-class GeoSimpleConcat(nn.Module):
-    """
-    改进版直接拼接：
-    1. 先对齐维度
-    2. 特征归一化
-    3. 两层MLP（防止梯度消失）
-    能收敛，比原版强很多
-    """
-    def __init__(self, img_dim=64, geo_dim=4, hidden_dim=None):
-        super().__init__()
-        hidden_dim = hidden_dim or img_dim * 2
-        
-        # 先把地理/属性特征升维，和图像特征维度匹配（关键改进）
-        self.geo_proj = nn.Sequential(
-            nn.Linear(geo_dim, img_dim),
-            nn.LayerNorm(img_dim),
-            nn.GELU()
-        )
-        
-        # 拼接后的融合MLP（两层，比单层强太多）
-        self.fusion = nn.Sequential(
-            nn.Linear(img_dim * 2, hidden_dim),
-            nn.LayerNorm(hidden_dim),
-            nn.GELU(),
-            nn.Linear(hidden_dim, img_dim)
-        )
-
-    def forward(self, instance_feat, geo_feat):
-        # instance_feat: 图像/实例特征 [B, img_dim]
-        # geo_feat:     几何/属性特征  [B, geo_dim]
-        
-        # 统一维度 + 归一化
-        geo_proj = self.geo_proj(geo_feat)  # [B, img_dim]
-        
-        # 拼接
-        fused = torch.cat([instance_feat, geo_proj], dim=-1)
-        
-        # 融合映射
-        out = self.fusion(fused)
-        return out
 
 class UNetFormer(nn.Module):
     def __init__(self,
@@ -204,24 +166,19 @@ class UNetFormer(nn.Module):
         self.fuse2 = CosGuidedMoEFusion(encoder_channels)
         self.fuse3 = CosGuidedMoEFusion(encoder_channels)
         self.fuse4 = CosGuidedMoEFusion(encoder_channels)
-        #消融实验：直接拼接+MLP融合
-        #self.AdaIN=GeoSimpleConcat(img_dim=decode_channels)
-        self.AdaIN=GeoConditionalAdaIN(img_dim=decode_channels)
+        self.AdaIN= GeoConditionalAdaIN(img_dim=decode_channels)
         self.attentionpool=AttentionPool(decode_channels)
 
     def forward(self, x, depth, masks,ufzs,geo_feat=None):
         b, _, h, w = x.size()
         modality_mask = ufzs.flatten(1).all(dim=1, keepdim=True).float()
-        ones_b1 = torch.ones(b, 1, device=x.device)
-        zeros_b2 = torch.zeros(b, 1, device=x.device)
-        #dsm_tensor = torch.bernoulli(torch.full((b, 1), 0.7, device=x.device))
-        modality_mask = torch.cat([ones_b1,zeros_b2,modality_mask], dim=1)
+        ones_b1 = torch.ones(b, 2, device=x.device)
+        modality_mask = torch.cat([ones_b1,modality_mask], dim=1)
 
         depth_feats = self.deep_encoder(depth)
         ufzs_feats = self.ufz_encoder(ufzs)
         deepx = self.image_encoder(x)  # 256*1024  
         deepx = deepx[0].permute(0, 2, 1).view(b, 1024, 32, 32)
-        ## 这个deepx可由interaction_indexes这个控制，配了一个UNetformer的解码器，自行修改
         deepx = self.neck(deepx)
         res1 = self.fpn1(deepx)   # 256 128 128 
         res2 = self.fpn2(deepx) # 256 64 64
@@ -245,28 +202,18 @@ class UNetFormer(nn.Module):
             building_ids = torch.unique(mask)
             building_ids = [id for id in building_ids if id != -1]
             for bid in building_ids:
-                mask_bid = (mask == bid).float()  # 生成当前建筑的二值mask
+                mask_bid = (mask == bid).float()  
                 mask_bid = mask_bid.unsqueeze(0).unsqueeze(0)
                 mask_interp = nn.functional.interpolate(
                     mask_bid, 
-                    size=(H_feat,W_feat),  # 对齐特征图尺寸
-                    mode='nearest',        # 双线性插值（适合mask）
+                    size=(H_feat,W_feat), 
+                    mode='nearest',       
                 )
                 mask_interp = mask_interp[0]
 
                 pooled_feat = self.attentionpool(feature.unsqueeze(0), mask_interp.unsqueeze(0))
                 instance_feats.append(pooled_feat)
 
-                # feat_flat = feature.reshape(d, -1)  # (d, 128×128)
-                # mask_flat = mask_interp.reshape(1, -1)  # (1, 128×128)
-                # sum_m = torch.clamp(mask_flat.sum(), min=1e-6)
-                # avg_f = torch.sum(feat_flat * mask_flat, dim=1) / sum_m
-                
-                # instance_feats.append(avg_f.unsqueeze(0))
-
-
-                # zeros_b2 = torch.zeros(4, device=x.device)
-                # geos_list.append(zeros_b2.unsqueeze(0))
 
                 geos_list.append(geo_feat[b,bid].unsqueeze(0))
 

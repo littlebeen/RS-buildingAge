@@ -55,11 +55,11 @@ invert_palette = {v: k for k, v in palette.items()}
 
 
 def print_image(data):
-    # 定义你要的5个区间
+
     bins = [0, 1000, 5000, 10000, np.inf]
     labels = ['0-1000', '1000-5000', '5000-10000', '10000+', ]
     
-    # 统计每个区间的数量
+
     counts = []
     for i in range(len(bins)-1):
         low = bins[i]
@@ -70,11 +70,9 @@ def print_image(data):
             cnt = np.sum((np.array(data) >= low) & (np.array(data) < high))
         counts.append(cnt)
 
-    # 画图
     plt.figure(figsize=(10, 5))
     bars = plt.bar(labels, counts, color='#4472C4', edgecolor='black', alpha=0.8)
 
-    # 在柱子上显示数量
     for bar, cnt in zip(bars, counts):
         plt.text(bar.get_x() + bar.get_width()/2,
                  bar.get_height() + max(counts)*0.01,
@@ -86,15 +84,15 @@ def print_image(data):
     plt.grid(axis='y', alpha=0.3)
     plt.tight_layout()
 
-    # 保存图片
+
     plt.savefig('building_pixel_distribution.png', dpi=300, bbox_inches='tight')
-    plt.close()  # 不弹出窗口，直接保存
+    plt.close() 
 
 def analyze_model(net, input_size=(10, 3, 512, 512), device="cuda", verbose=True):
-    # 切换到评估模式
+
     net.eval()
     
-    # 创建输入
+
     dummy_input = torch.randn(input_size).to(device)
     depth_input =torch.randn((10, 1, 512, 512)).to(device)
     ufz_input =torch.randn((10, 4, 512, 512)).to(device)
@@ -110,13 +108,12 @@ def analyze_model(net, input_size=(10, 3, 512, 512), device="cuda", verbose=True
     # net(dummy_input,depth_input,ufz_input,dummy_input)
     # flops, params_m, complexity_g = 0, 0, 0
 
-    # ===================== 2. 计算显存占用 =====================
+
     torch.cuda.empty_cache()
     torch.cuda.reset_peak_memory_stats()
     with torch.no_grad():
         net(dummy_input,depth_input,depth_input,ufz_input)
     memory_mb = torch.cuda.max_memory_allocated() / (1024 ** 2)
-    # ===================== 3. 计算推理速度 =====================
     
     with torch.no_grad():
         for _ in range(5): 
@@ -127,7 +124,6 @@ def analyze_model(net, input_size=(10, 3, 512, 512), device="cuda", verbose=True
             net(dummy_input,depth_input,depth_input,ufz_input)
         fps = iters / (time.time() - t0)
 
-    # ===================== 结果格式化 =====================
     result = {
         "Complexity_FLOPs_G": complexity_g if flops else 0,
         "Memory_MB": round(memory_mb, 2),
@@ -137,7 +133,6 @@ def analyze_model(net, input_size=(10, 3, 512, 512), device="cuda", verbose=True
 
     if verbose:
         print("=" * 60)
-        print(f"✅ 模型分析结果")
         print(f"📊 Complexity:      {result['Complexity_FLOPs_G']:.2f} G")
         print(f"📦 Params:     {result['Params_M']:.2f} M")
         print(f"💾 Memory:     {result['Memory_MB']:.2f} MB")
